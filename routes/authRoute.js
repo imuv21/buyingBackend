@@ -1,5 +1,5 @@
 import express from 'express';
-import { signupValidator, loginValidator, forgotPasswordValidator, verifyPasswordOtpValidator } from '../middlewares/validation.js';
+import { signupValidator, loginValidator, forgotPasswordValidator, verifyPasswordOtpValidator, updateProfileValidator, addressValidator } from '../middlewares/validation.js';
 import upload from '../middlewares/upload.js';
 import authedUser from '../middlewares/authedUser.js';
 import rateLimiter from '../middlewares/rateLimiter.js';
@@ -16,6 +16,11 @@ router.post('/verify-password-otp', verifyPasswordOtpValidator, userCont.verifyP
 
 // Private routes
 router.use(authedUser);
+router.post('/add-address', addressValidator, userCont.addAddress);
+router.patch('/edit-address', addressValidator, userCont.editAddress);
+router.get('/get-address', userCont.getAddress);
+router.delete('/delete-address/:addressId', userCont.deleteAddress);
+router.patch('/update-profile', updateProfileValidator, userCont.updateProfile);
 router.delete('/delete-user', userCont.deleteUser);
 router.post('/add-review', upload.array('images', 2), userCont.addReview);
 router.delete('/delete-review', userCont.deleteReview);

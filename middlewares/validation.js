@@ -87,7 +87,23 @@ const updateProfileValidator = [
         .withMessage("First name must not exceed 20 characters!"),
     check("lastName").not().isEmpty()
         .withMessage("Last name is required!").isLength({ max: 20 })
-        .withMessage("Last name must not exceed 20 characters!"),
+        .withMessage("Last name must not exceed 20 characters!")
 ];
 
-export { signupValidator, loginValidator, forgotPasswordValidator, verifyPasswordOtpValidator };
+const addressValidator = [
+    check("address")
+        .notEmpty().withMessage("Address is required!")
+        .isLength({ max: 80 }).withMessage("Address must not exceed 80 characters!"),
+    check("city")
+        .notEmpty().withMessage("City is required!")
+        .isLength({ max: 40 }).withMessage("City must not exceed 40 characters!"),
+    check("landmark")
+        .isLength({ max: 80 }).withMessage("Landmark must not exceed 80 characters!"),
+    check("pincode")
+        .isLength({ max: 20 }).withMessage("Pincode must not exceed 20 characters!"),
+    check("number")
+        .notEmpty().withMessage("Phone number is required!")
+        .isMobilePhone("any").withMessage("Phone number must be a valid mobile number!")
+];
+
+export { signupValidator, loginValidator, forgotPasswordValidator, verifyPasswordOtpValidator, updateProfileValidator, addressValidator };

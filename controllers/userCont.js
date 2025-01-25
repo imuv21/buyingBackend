@@ -63,9 +63,8 @@ class userCont {
         if (!errors.isEmpty()) {
             return res.status(400).json({ status: "failed", errors: errors.array() });
         }
-        const { email, role, password } = req.body;
-
         try {
+            const { email, role, password } = req.body;
             const userExists = await User.findOne({ email, role });
             if (userExists) {
                 return res.status(400).json({ status: "failed", message: `User already exists!` });
@@ -101,19 +100,19 @@ class userCont {
 
             await sendMail(newUser.email, 'Verify your account', msg);
             return res.status(201).json({ status: "success", message: `Please verify your account using the OTP sent to ${newUser.email}` });
+
         } catch (error) {
             return res.status(500).json({ status: "failed", message: "Server error, Please try again later!" });
         }
     };
 
     static verifyOtp = async (req, res) => {
-
-        const { email, role, otp } = req.body;
-
-        if (!otp) {
-            return res.status(400).json({ status: "failed", message: "OTP is required!" });
-        }
         try {
+            const { email, role, otp } = req.body;
+
+            if (!otp) {
+                return res.status(400).json({ status: "failed", message: "OTP is required!" });
+            }
             const user = await User.findOne({ email, role });
             if (!user) {
                 return res.status(404).json({ status: "failed", message: "User with this role doesn't exist!" });
@@ -132,6 +131,7 @@ class userCont {
             );
 
             return res.status(200).json({ status: "success", message: "Email verified successfully. Please login now." });
+
         } catch (error) {
             return res.status(500).json({ status: "failed", message: "Server error, Please try again later!" });
         }
@@ -139,18 +139,12 @@ class userCont {
 
     static deleteUser = async (req, res) => {
         try {
-            const { email, role, password } = req.body;
-            if (!email || !role || !password) {
-                return res.status(400).json({ status: "failed", message: "All fields are required!" });
-            }
-            const user = await User.findOne({ email, role });
+            const userId = req.user._id;
+            const user = await User.findById(userId);
             if (!user) {
-                return res.status(404).json({ status: "failed", message: "User with this role doesn't exist!" });
+                return res.status(404).json({ status: "failed", message: "User not found!" });
             }
-            const isMatch = await bcrypt.compare(password, user.password);
-            if (!isMatch) {
-                return res.status(401).json({ status: "failed", message: "Invalid password!" });
-            }
+
             await User.deleteOne({ _id: user._id });
             return res.status(200).json({ status: "success", message: "User deleted successfully." });
 
@@ -160,13 +154,13 @@ class userCont {
     };
 
     static userLogin = async (req, res) => {
-        try {
-            const errors = validationResult(req);
-            if (!errors.isEmpty()) {
-                return res.status(400).json({ status: "failed", errors: errors.array() });
-            }
-            const { email, password, role } = req.body;
 
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ status: "failed", errors: errors.array() });
+        }
+        try {
+            const { email, password, role } = req.body;
             const user = await User.findOne({ email, role });
             if (!user) {
                 return res.status(404).json({ status: "failed", message: "User with this role doesn't exist!" });
@@ -176,7 +170,6 @@ class userCont {
                 return res.status(400).json({ status: "failed", message: "Email or password is incorrect!" });
             }
             const token = jwt.sign({ userID: user._id, role: user.role }, process.env.JWT_SECRET_KEY, { expiresIn: '1d' });
-
             const userResponse = {
                 _id: user._id,
                 firstName: user.firstName,
@@ -185,8 +178,8 @@ class userCont {
                 role: user.role,
                 isVerified: user.isVerified
             };
-
             return res.status(200).json({ status: "success", message: "User logged in successfully.", token, user: userResponse });
+
         } catch (error) {
             return res.status(500).json({ status: "failed", message: "Server error, Please try again later!" });
         }
@@ -197,9 +190,8 @@ class userCont {
         if (!errors.isEmpty()) {
             return res.status(400).json({ status: "failed", errors: errors.array() });
         }
-        const { email, role } = req.body;
-
         try {
+            const { email, role } = req.body;
             const user = await User.findOne({ email, role });
             if (!user) {
                 return res.status(404).json({ status: "failed", message: "User with this role doesn't exist!" });
@@ -207,7 +199,6 @@ class userCont {
 
             const otp = crypto.randomInt(100000, 999999).toString(); // Generate 6-digit OTP
             const otpExpiry = Date.now() + 10 * 60 * 1000; // 10 minutes
-
             await User.updateOne({ email, role },
                 { $set: { otp, otpExpiry } }
             );
@@ -239,9 +230,8 @@ class userCont {
         if (!errors.isEmpty()) {
             return res.status(400).json({ status: "failed", errors: errors.array() });
         }
-        const { email, role, otp, newPassword } = req.body;
-
         try {
+            const { email, role, otp, newPassword } = req.body;
             const user = await User.findOne({ email, role });
             if (!user) {
                 return res.status(404).json({ status: "failed", message: "User with this role doesn't exist!" });
@@ -262,12 +252,143 @@ class userCont {
                     $unset: { otp: "", otpExpiry: "" }
                 }
             );
-
             return res.status(200).json({ status: "success", message: "Password updated successfully." });
+
         } catch (error) {
             return res.status(500).json({ status: "failed", message: "Server error, Please try again later!" });
         }
     };
+
+    static updateProfile = async (req, res) => {
+
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ status: "failed", errors: errors.array() });
+        }
+        try {
+            const { firstName, lastName } = req.body;
+            const userId = req.user._id;
+            const user = await User.findById(userId);
+            if (!user) {
+                return res.status(404).json({ status: "failed", message: "User not found!" });
+            }
+
+            user.firstName = firstName || user.firstName;
+            user.lastName = lastName || user.lastName;
+            await user.save();
+            return res.status(200).json({ status: "success", message: "Profile updated successfully.", profile: { firstName: user.firstName, lastName: user.lastName } });
+
+        } catch (error) {
+            return res.status(500).json({ status: "failed", message: "Server error, Please try again later!" });
+        }
+    }
+
+    static addAddress = async (req, res) => {
+
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ status: "failed", errors: errors.array() });
+        }
+        try {
+            const userId = req.user._id;
+            const { address, city, landmark, pincode, number, isDefault } = req.body;
+
+            const user = await User.findById(userId);
+            if (!user) {
+                return res.status(404).json({ status: "failed", message: "User not found!" });
+            }
+            if (isDefault) {
+                user.addresses.forEach((addr) => {
+                    addr.isDefault = false;
+                });
+            }
+            user.addresses.push({ address, city, landmark, pincode, number, isDefault: !!isDefault });
+            await user.save();
+
+            return res.status(200).json({ status: "success", message: "Address added successfully!", addresses: user.addresses });
+
+        } catch (error) {
+            return res.status(500).json({ status: "failed", message: "Server error, Please try again later!" });
+        }
+    }
+
+    static editAddress = async (req, res) => {
+
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ status: "failed", errors: errors.array() });
+        }
+        try {
+            const userId = req.user._id;
+            const { addressId, address, city, landmark, pincode, number, isDefault } = req.body;
+
+            const user = await User.findById(userId);
+            if (!user) {
+                return res.status(404).json({ status: "failed", message: "User not found!" });
+            }
+            const existingAddress = user.addresses.id(addressId);
+            if (!existingAddress) {
+                return res.status(404).json({ status: "failed", message: "Address not found!" });
+            }
+            if (isDefault) {
+                user.addresses.forEach((addr) => {
+                    addr.isDefault = false;
+                });
+            }
+
+            existingAddress.address = address || existingAddress.address;
+            existingAddress.city = city || existingAddress.city;
+            existingAddress.landmark = landmark || existingAddress.landmark;
+            existingAddress.pincode = pincode || existingAddress.pincode;
+            existingAddress.number = number || existingAddress.number;
+            existingAddress.isDefault = !!isDefault;
+            await user.save();
+
+            return res.status(200).json({ status: "success", message: "Address updated successfully!", addresses: user.addresses });
+        } catch (error) {
+            return res.status(500).json({ status: "failed", message: "Server error, Please try again later!" });
+        }
+    };
+
+    static getAddress = async (req, res) => {
+        try {
+            const userId = req.user._id;
+            const user = await User.findById(userId);
+            if (!user) {
+                return res.status(404).json({ status: "failed", message: "User not found!" });
+            }
+            return res.status(200).json({ status: "success", message: "Addresses fetched successfully!", addresses: user.addresses });
+
+        } catch (error) {
+            return res.status(500).json({ status: "failed", message: "Server error, Please try again later!" });
+        }
+    }
+
+    static deleteAddress = async (req, res) => {
+        try {
+            const userId = req.user._id;
+            const { addressId } = req.params;
+
+            const user = await User.findById(userId);
+            if (!user) {
+                return res.status(404).json({ status: "failed", message: "User not found!" });
+            }
+            const addressIndex = user.addresses.findIndex(
+                (address) => address._id.toString() === addressId
+            );
+            if (addressIndex === -1) {
+                return res.status(404).json({ status: "failed", message: "Address not found!" });
+            }
+            user.addresses.splice(addressIndex, 1);
+            await user.save();
+
+            return res.status(200).json({ status: "success", message: "Address deleted successfully!", addresses: user.addresses });
+
+        } catch (error) {
+            return res.status(500).json({ status: "failed", message: "Server error, Please try again later!" });
+        }
+    };
+
 
 
 

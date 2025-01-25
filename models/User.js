@@ -121,6 +121,37 @@ const categorySchema = new mongoose.Schema({
     }
 });
 
+// Address schema
+const addressSchema = new mongoose.Schema({
+    address: {
+        type: String,
+        required: true,
+        trim: true,
+    },
+    city: {
+        type: String,
+        required: true,
+        trim: true,
+    },
+    landmark: {
+        type: String,
+        trim: true,
+    },
+    pincode: {
+        type: String,
+        trim: true,
+    },
+    number: {
+        type: String,
+        required: true,
+        trim: true,
+    },
+    isDefault: {
+        type: Boolean,
+        default: false
+    }
+});
+
 // User schema
 const userSchema = new mongoose.Schema({
     firstName: {
@@ -160,6 +191,7 @@ const userSchema = new mongoose.Schema({
     otpExpiry: {
         type: Date,
     },
+    addresses: [addressSchema]
 });
 
 // Models
