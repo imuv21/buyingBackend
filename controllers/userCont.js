@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { v2 as cloudinary } from 'cloudinary';
 import { validationResult } from "express-validator";
-import { User, Product, Category } from '../models/User.js';
+import { User, Product, Category, Tag } from '../models/User.js';
 import sendMail from '../middlewares/sendMail.js';
 import dotenv from 'dotenv';
 dotenv.config();
@@ -31,18 +31,6 @@ const uploadPosters = (buffer) => {
 const uploadCatPosters = (buffer) => {
     return new Promise((resolve, reject) => {
         const stream = cloudinary.uploader.upload_stream({ folder: 'Buying/Categories' }, (error, result) => {
-            if (error) {
-                return reject(error);
-            }
-            resolve(result.secure_url);
-        });
-        stream.end(buffer);
-    });
-};
-
-const uploadReviewPosters = (buffer) => {
-    return new Promise((resolve, reject) => {
-        const stream = cloudinary.uploader.upload_stream({ folder: 'Buying/Reviews' }, (error, result) => {
             if (error) {
                 return reject(error);
             }
@@ -389,151 +377,105 @@ class userCont {
         }
     };
 
-
-
-
-    //user conts
-
     static addReview = async (req, res) => {
+
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ status: "failed", errors: errors.array() });
+        }
         try {
             const { productId, reviewText, rating } = req.body;
             const userId = req.user.id;
 
-            if (!productId || !reviewText || !rating) {
-                return res.status(400).json({ status: "failed", message: "All fields are required!" });
+            const user = await User.findById(userId);
+            if (!user) {
+                return res.status(404).json({ status: "failed", message: "User not found!" });
             }
-            const parsedRating = parseInt(rating);
-            if (![1, 2, 3, 4, 5].includes(parsedRating)) {
-                return res.status(400).json({ status: "failed", message: "Rating must be between 1 and 5!" });
+            if (!productId) {
+                return res.status(400).json({ status: "failed", message: "Product Id not found!" });
             }
             const product = await Product.findById(productId);
             if (!product) {
                 return res.status(404).json({ status: "failed", message: "Product not found!" });
             }
+            // const existingReview = product.reviews.find((review) => review.userId.toString() === userId);
+            // if (existingReview) {
+            //     return res.status(403).json({ status: "failed", message: "You have already reviewed this product!" });
+            // }
 
-            const existingReview = product.reviews.find((review) => review.userId.toString() === userId);
-            if (existingReview) {
-                return res.status(403).json({ status: "failed", message: "You have already reviewed this product!" });
-            }
-
-            const uploadedImageUrls = [];
-            if (req.files && req.files.length > 0) {
-                if (req.files.length > 2) {
-                    return res.status(400).json({ error: "You can upload a maximum of 2 images!" });
-                }
-                const imageUploadPromises = req.files.map((file) => uploadReviewPosters(file.buffer));
-                uploadedImageUrls.push(...(await Promise.all(imageUploadPromises)));
-            }
-
-            const newReview = { review: reviewText, rating: parsedRating, userId, images: uploadedImageUrls };
+            const newReview = { review: reviewText, rating: rating, userId };
             product.reviews.push(newReview);
-
-            switch (parsedRating) {
-                case 1:
-                    product.oneStar += 1;
-                    break;
-                case 2:
-                    product.twoStar += 1;
-                    break;
-                case 3:
-                    product.threeStar += 1;
-                    break;
-                case 4:
-                    product.fourStar += 1;
-                    break;
-                case 5:
-                    product.fiveStar += 1;
-                    break;
-                default:
-                    break;
+            switch (rating) {
+                case 1: product.oneStar += 1; break;
+                case 2: product.twoStar += 1; break;
+                case 3: product.threeStar += 1; break;
+                case 4: product.fourStar += 1; break;
+                case 5: product.fiveStar += 1; break;
+                default: break;
             }
 
             const totalRatings = product.oneStar + product.twoStar + product.threeStar + product.fourStar + product.fiveStar;
             const totalScore = product.oneStar * 1 + product.twoStar * 2 + product.threeStar * 3 + product.fourStar * 4 + product.fiveStar * 5;
             product.averageRating = totalRatings > 0 ? parseFloat((totalScore / totalRatings).toFixed(1)) : 0;
             await product.save();
-
-            // const savedReview = product.reviews[product.reviews.length - 1];
-            // await User.findByIdAndUpdate(userId, {
-            //     $push: {
-            //         reviewedProducts: {
-            //             productId,
-            //             reviewId: savedReview._id,
-            //         },
-            //     },
-            // });
-
             return res.status(201).json({ status: "success", message: "Review added successfully." });
+
         } catch (error) {
-            return res.status(500).json({ status: "failed", message: "Server error, Please try again later!", error: error.message });
+            return res.status(500).json({ status: "failed", message: "Server error, Please try again later!" });
         }
     };
 
-    static deleteReview = async (req, res) => {
+    static getReviews = async (req, res) => {
         try {
-            const { productId, reviewId } = req.body;
-            const userId = req.user.id;
+            const { productId } = req.params;
+            let { page = 1, size = 10, sortBy = "createdAt", order = "desc" } = req.query;
+            page = Math.max(1, parseInt(page));
+            size = Math.max(1, parseInt(size));
 
-            if (!productId || !reviewId) {
-                return res.status(400).json({ status: "failed", message: "Product ID and Review ID are required!" });
+            if (!productId) {
+                return res.status(400).json({ status: "failed", message: "Product Id not found!" });
             }
-            const product = await Product.findById(productId);
+            const product = await Product.findById(productId).select('reviews').populate({
+                path: 'reviews.userId',
+                select: 'firstName lastName'
+            });
             if (!product) {
                 return res.status(404).json({ status: "failed", message: "Product not found!" });
             }
-            const reviewIndex = product.reviews.findIndex(
-                (review) => review._id.toString() === reviewId && review.userId.toString() === userId
-            );
-            if (reviewIndex === -1) {
-                return res.status(403).json({ status: "failed", message: "Review not found or does not belong to the user!" });
-            }
 
-            const reviewToDelete = product.reviews[reviewIndex];
-            if (reviewToDelete.images && reviewToDelete.images.length > 0) {
-                const reviewImageDeletePromises = reviewToDelete.images.map(async (imageUrl) => {
-                    try {
-                        const publicId = imageUrl.split("/").pop().split(".")[0];
-                        await cloudinary.uploader.destroy(`Buying/Reviews/${publicId}`);
-                    } catch (error) {
-                        console.error("Failed to extract publicId from imageUrl:", imageUrl, error);
-                    }
-                });
-                await Promise.all(reviewImageDeletePromises);
-            }
-
-            product.reviews.splice(reviewIndex, 1);
-            switch (reviewToDelete.rating) {
-                case 1:
-                    product.oneStar -= 1;
-                    break;
-                case 2:
-                    product.twoStar -= 1;
-                    break;
-                case 3:
-                    product.threeStar -= 1;
-                    break;
-                case 4:
-                    product.fourStar -= 1;
-                    break;
-                case 5:
-                    product.fiveStar -= 1;
-                    break;
-                default:
-                    break;
-            }
-
-            const totalRatings = product.oneStar + product.twoStar + product.threeStar + product.fourStar + product.fiveStar;
-            const totalScore = product.oneStar * 1 + product.twoStar * 2 + product.threeStar * 3 + product.fourStar * 4 + product.fiveStar * 5;
-            product.averageRating = totalRatings > 0 ? parseFloat((totalScore / totalRatings).toFixed(1)) : 0;
-            await product.save();
-
-            await User.findByIdAndUpdate(userId, {
-                $pull: { reviewedProducts: { productId, reviewId } },
+            const sortOptions = {};
+            const sortField = sortBy === 'rating' ? 'rating' : 'createdAt';
+            sortOptions[sortField] = order.toLowerCase() === 'asc' ? 1 : -1;
+            const sortedReviews = product.reviews.sort((a, b) => {
+                if (sortField === 'createdAt') {
+                    return order === 'asc' ? a.createdAt - b.createdAt : b.createdAt - a.createdAt;
+                }
+                return order === 'asc' ? a.rating - b.rating : b.rating - a.rating;
             });
+            const skip = (page - 1) * size;
+            const paginatedReviews = sortedReviews.slice(skip, skip + size);
 
-            return res.status(200).json({ status: "success", message: "Review deleted successfully." });
+            const totalReviews = product.reviews.length;
+            const totalPages = Math.ceil(totalReviews / size);
+            const pageReviews =  paginatedReviews.length;
+            const isFirst = page === 1;
+            const isLast = page === totalPages || totalPages === 0;
+            const hasNext = page < totalPages;
+            const hasPrevious = page > 1;
+
+            const reviewsWithUserInfo = paginatedReviews.map(review => ({
+                review: review.review,
+                rating: review.rating,
+                createdAt: review.createdAt,
+                firstName: review.userId?.firstName || "Unknown",
+                lastName: review.userId?.lastName || "Unknown",
+                id: review._id
+            }));
+
+            return res.status(200).json({ status: "success", reviews: reviewsWithUserInfo, totalReviews, totalPages, pageReviews, isFirst, isLast, hasNext, hasPrevious });
+
         } catch (error) {
-            return res.status(500).json({ status: "failed", message: "Server error, Please try again later!", error: error.message });
+            return res.status(500).json({ status: "failed", message: "Server error, Please try again later!" });
         }
     };
 
@@ -541,8 +483,8 @@ class userCont {
         try {
             const { productId, reviewId, userId } = req.body;
 
-            if (!productId || !reviewId) {
-                return res.status(400).json({ status: "failed", message: "Product ID and Review ID are required!" });
+            if (!productId || !reviewId || !userId) {
+                return res.status(400).json({ status: "failed", message: "Product Id, Review Id and User Id are required!" });
             }
             const product = await Product.findById(productId);
             if (!product) {
@@ -556,17 +498,6 @@ class userCont {
             }
 
             const reviewToDelete = product.reviews[reviewIndex];
-            if (reviewToDelete.images && reviewToDelete.images.length > 0) {
-                const reviewImageDeletePromises = reviewToDelete.images.map(async (imageUrl) => {
-                    try {
-                        const publicId = imageUrl.split("/").pop().split(".")[0];
-                        await cloudinary.uploader.destroy(`Buying/Reviews/${publicId}`);
-                    } catch (error) {
-                        console.error("Failed to extract publicId from imageUrl:", imageUrl, error);
-                    }
-                });
-                await Promise.all(reviewImageDeletePromises);
-            }
 
             product.reviews.splice(reviewIndex, 1);
             switch (reviewToDelete.rating) {
@@ -596,45 +527,12 @@ class userCont {
 
             return res.status(200).json({ status: "success", message: "Review deleted successfully." });
         } catch (error) {
-            return res.status(500).json({ status: "failed", message: "Server error, Please try again later!", error: error.message });
-        }
-    };
-
-    static updateReviewStatusAdmin = async (req, res) => {
-        try {
-            const { productId, reviewId, userId, status } = req.body;
-
-            if (!productId || !reviewId || !status) {
-                return res.status(400).json({ status: "failed", message: "Product ID, Review ID, and status are required!" });
-            }
-            if (!['pending', 'approved'].includes(status)) {
-                return res.status(400).json({ status: "failed", message: "Invalid status. Status must be either 'pending' or 'approved'." });
-            }
-
-            const product = await Product.findById(productId);
-            if (!product) {
-                return res.status(404).json({ status: "failed", message: "Product not found!" });
-            }
-
-            const review = product.reviews.find(
-                (r) => r._id.toString() === reviewId && r.userId.toString() === userId
-            );
-            if (!review) {
-                return res.status(403).json({ status: "failed", message: "Review not found or does not belong to the user!" });
-            }
-
-            review.status = status;
-            await product.save();
-
-            return res.status(200).json({ status: "success", message: "Review status updated successfully.", review });
-        } catch (error) {
-            return res.status(500).json({ status: "failed", message: "Server error, Please try again later!", error: error.message });
+            return res.status(500).json({ status: "failed", message: "Server error, Please try again later!" });
         }
     };
 
 
-
-    //product & category conts
+    //admin category & tag conts
 
     static addCategory = async (req, res) => {
         try {
@@ -642,7 +540,9 @@ class userCont {
             if (!categoryName) {
                 return res.status(400).json({ status: "failed", message: "Category name is required!" });
             }
-
+            if (!req.file) {
+                return res.status(400).json({ status: "failed", message: "Category image is required!" });
+            }
             let uploadedImageUrl = null;
             if (req.file) {
                 try {
@@ -683,28 +583,111 @@ class userCont {
         }
     };
 
-    static addProduct = async (req, res) => {
+    static getCategories = async (req, res) => {
         try {
-            const { title, category, originalPrice, salePrice, information, stocks } = req.body;
-
-            if (!title || !category || !originalPrice || !salePrice || !information || !stocks) {
-                return res.status(400).json({ status: "failed", message: "All fields are required!" });
-            }
-            if (salePrice === originalPrice || salePrice > originalPrice) {
-                return res.status(400).json({ status: "failed", message: "Original price should be greater than sale price!" });
-            }
-            if (!req.files || req.files.length !== 5) {
-                return res.status(400).json({ status: "failed", message: "At least 5 images are required!" });
+            const categories = await Category.find();
+            if (categories.length === 0) {
+                return res.status(404).json({ status: "failed", message: "No categories found!" });
             }
 
+            return res.status(200).json({ status: "success", categories });
+
+        } catch (error) {
+            return res.status(500).json({ status: "failed", message: "Server error, Please try again later!" });
+        }
+    };
+
+    static getTags = async (req, res) => {
+        try {
+            const searchQuery = req.query.search || '';
+            const regex = new RegExp(searchQuery, 'i');
+            const tags = await Tag.find({ tagName: { $regex: regex } }).limit(25).exec();
+
+            return res.status(200).json({ status: 'success', tags });
+
+        } catch (error) {
+            return res.status(500).json({ status: 'failed', message: 'Server error, Please try again later!' });
+        }
+    };
+
+
+    //admin product conts
+
+    static addProduct = async (req, res) => {
+
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ status: "failed", errors: errors.array() });
+        }
+        try {
+            const { tags, title, category, originalPrice, salePrice, stocks, information } = req.body;
+
+            if (!req.files || req.files.length < 2) {
+                return res.status(400).json({ status: "failed", message: "At least 2 images are required!" });
+            }
             const imageUploadPromises = req.files.map((file) => uploadPosters(file.buffer));
             const uploadedImageUrls = await Promise.all(imageUploadPromises);
 
+            const existingTags = await Tag.find({ tagName: { $in: tags } });
+            const existingTagNames = existingTags.map(tag => tag.tagName);
+            const newTagNames = tags.filter(tag => !existingTagNames.includes(tag));
+            const newTags = newTagNames.map(tag => new Tag({ tagName: tag }));
+            if (newTags.length > 0) {
+                await Tag.insertMany(newTags);
+            }
+
             const inStock = stocks > 0;
-            const newProduct = new Product({ title, category, originalPrice, salePrice, information, stocks, inStock, images: uploadedImageUrls });
+            const newProduct = new Product({ tags: [...existingTagNames, ...newTagNames], title, category, originalPrice, salePrice, stocks, inStock, information, images: uploadedImageUrls });
             await newProduct.save();
 
             return res.status(201).json({ status: "success", message: "Product added successfully." });
+        } catch (error) {
+            return res.status(500).json({ status: "failed", message: "Server error, Please try again later!" });
+        }
+    };
+
+    static getProducts = async (req, res) => {
+        try {
+            let { page = 1, size = 10, search = "", category = "", sortBy = "salePrice", order = "asc" } = req.query;
+            page = Math.max(1, parseInt(page));
+            size = Math.max(1, parseInt(size));
+
+            const filter = {};
+            if (search) {
+                filter.$or = [
+                    { title: { $regex: search, $options: "i" } },
+                    { tags: { $regex: search, $options: "i" } }
+                ];
+            }
+            if (category) {
+                filter.category = category;
+            }
+            const sortOptions = {
+                "salePrice": { salePrice: order === "asc" ? 1 : -1 },
+                "title": { title: order === "asc" ? 1 : -1 },
+                "averageRating": { averageRating: order === "asc" ? 1 : -1 }
+            };
+            const sortCriteria = sortOptions[sortBy] || { salePrice: 1 };
+
+            const totalProducts = await Product.countDocuments(filter);
+            const products = await Product.find(filter)
+                .select('_id title originalPrice salePrice inStock averageRating images')
+                .skip((page - 1) * size).limit(size).sort(sortCriteria).lean().exec();
+
+            const transformedProducts = products.map(product => ({
+                ...product,
+                images: product.images.slice(0, 2)
+            }));
+
+            const totalPages = Math.ceil(totalProducts / size);
+            const pageProducts = transformedProducts.length;
+            const isFirst = page === 1;
+            const isLast = page === totalPages || totalPages === 0;
+            const hasNext = page < totalPages;
+            const hasPrevious = page > 1;
+
+            return res.status(200).json({ status: "success", products: transformedProducts, totalProducts, totalPages, pageProducts, isFirst, isLast, hasNext, hasPrevious });
+
         } catch (error) {
             return res.status(500).json({ status: "failed", message: "Server error, Please try again later!" });
         }
@@ -751,20 +734,22 @@ class userCont {
         }
     };
 
+    static getProductDetails = async (req, res) => {
+        try {
+            const { productId } = req.params;
+            if (!productId) {
+                return res.status(400).json({ status: "failed", message: "Product Id is required!" });
+            }
+            const productDetails = await Product.findById(productId).select("-reviews");
+            if (!productDetails) {
+                return res.status(404).json({ status: "failed", message: "Product not found!" });
+            }
+            return res.status(200).json({ status: "success", productDetails });
 
-    // const getUserReviews = async (userId) => {
-    //     const user = await User.findById(userId).populate({
-    //         path: "reviewedProducts.productId",
-    //         select: "title category averageRating",
-    //     });
-
-    //     return user.reviewedProducts.map((review) => ({
-    //         productTitle: review.productId.title,
-    //         productCategory: review.productId.category,
-    //         averageRating: review.productId.averageRating,
-    //         reviewId: review.reviewId,
-    //     }));
-    // };
+        } catch (error) {
+            return res.status(500).json({ status: "failed", message: "Server error, please try again later!" });
+        }
+    };
 
 }
 

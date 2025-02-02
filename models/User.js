@@ -13,25 +13,15 @@ const reviewSchema = new mongoose.Schema({
         min: 1,
         max: 5,
     },
-    images: [
-        {
-            type: String
-        },
-    ],
     userId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",
         required: true,
     },
-    status: {
-        type: String,
-        enum: ['pending', 'approved'],
-        default: 'pending',
-    },    
     createdAt: {
         type: Date,
         default: Date.now,
-    },
+    }
 });
 
 // Product schema
@@ -39,73 +29,75 @@ const productSchema = new mongoose.Schema({
     title: {
         type: String,
         required: true,
-        trim: true,
+        trim: true
     },
     category: {
         type: String,
         required: true,
-        trim: true,
+        trim: true
     },
     originalPrice: {
         type: Number,
-        required: true,
-        trim: true,
+        required: true
     },
     salePrice: {
         type: Number,
-        required: true,
-        trim: true,
+        required: true
     },
     information: {
         type: String,
         required: true,
-        trim: true,
+        trim: true
     },
     stocks: {
         type: Number,
         required: true,
-        trim: true,
-        default: 0,
+        default: 0
     },
     inStock: {
         type: Boolean,
-        default: true,
+        default: true
     },
     boughtCounter: {
         type: Number,
-        default: 0,
+        default: 0
     },
     oneStar: {
         type: Number,
-        default: 0,
+        default: 0
     },
     twoStar: {
         type: Number,
-        default: 0,
+        default: 0
     },
     threeStar: {
         type: Number,
-        default: 0,
+        default: 0
     },
     fourStar: {
         type: Number,
-        default: 0,
+        default: 0
     },
     fiveStar: {
         type: Number,
-        default: 0,
+        default: 0
     },
     reviews: [reviewSchema],
     averageRating: {
         type: Number,
-        default: 0,
+        default: 0
     },
     images: [
         {
             type: String,
             required: true
-        },
+        }
     ],
+    tags: {
+        type: [String],
+        required: true,
+        default: []
+    }
 });
 
 // Category schema
@@ -117,6 +109,15 @@ const categorySchema = new mongoose.Schema({
     }, 
     categoryImage: {
         type: String,
+        trim: true
+    }
+});
+
+// Tag schema
+const tagSchema = new mongoose.Schema({
+    tagName: {
+        type: String,
+        required: true,
         trim: true
     }
 });
@@ -198,5 +199,6 @@ const userSchema = new mongoose.Schema({
 const User = mongoose.model("User", userSchema);
 const Product = mongoose.model("Product", productSchema);
 const Category = mongoose.model("Category", categorySchema);
+const Tag = mongoose.model("Tag", tagSchema);
 
-export { User, Product, Category };
+export { User, Product, Category, Tag };
