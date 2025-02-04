@@ -29,6 +29,10 @@ router.get('/get-address', userCont.getAddress);
 router.delete('/delete-address/:addressId', userCont.deleteAddress);
 router.patch('/update-profile', updateProfileValidator, userCont.updateProfile);
 router.post('/add-review', addReviewValidator, userCont.addReview);
+router.post('/add-to-cart', userCont.addToCart);
+router.get('/get-cart', userCont.getCart);
+router.put('/cart-quantity/:cartItemId', userCont.adjustCartQuantity);
+router.delete('/remove-from-cart', userCont.removeFromCart);
 
 
 // router.post('/signup', rateLimiter({ windowMs: 60 * 60 * 1000, max: 10 }), upload.single('image'), signupValidator, userCont.userSignup);

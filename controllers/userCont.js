@@ -457,7 +457,7 @@ class userCont {
 
             const totalReviews = product.reviews.length;
             const totalPages = Math.ceil(totalReviews / size);
-            const pageReviews =  paginatedReviews.length;
+            const pageReviews = paginatedReviews.length;
             const isFirst = page === 1;
             const isLast = page === totalPages || totalPages === 0;
             const hasNext = page < totalPages;
@@ -611,7 +611,7 @@ class userCont {
     };
 
 
-    //admin product conts
+    //admin product & cart conts
 
     static addProduct = async (req, res) => {
 
@@ -671,7 +671,7 @@ class userCont {
 
             const totalProducts = await Product.countDocuments(filter);
             const products = await Product.find(filter)
-                .select('_id title originalPrice salePrice inStock averageRating images')
+                .select('_id title originalPrice salePrice stocks averageRating images')
                 .skip((page - 1) * size).limit(size).sort(sortCriteria).lean().exec();
 
             const transformedProducts = products.map(product => ({
@@ -745,6 +745,179 @@ class userCont {
                 return res.status(404).json({ status: "failed", message: "Product not found!" });
             }
             return res.status(200).json({ status: "success", productDetails });
+
+        } catch (error) {
+            return res.status(500).json({ status: "failed", message: "Server error, please try again later!" });
+        }
+    };
+
+    static addToCart = async (req, res) => {
+        try {
+            const { productId, quantity, color, size } = req.body;
+            const userId = req.user._id;
+
+            if (!productId || !quantity) {
+                return res.status(400).json({ status: "failed", message: "Something went wrong!" });
+            }
+            const product = await Product.findById(productId);
+            if (!product) {
+                return res.status(404).json({ status: "failed", message: "Product not found!" });
+            }
+            const user = await User.findById(userId);
+            if (!user) {
+                return res.status(404).json({ status: "failed", message: "User not found!" });
+            }
+            const currentTotal = user.cart.reduce((total, item) => total + item.quantity, 0);
+            if (currentTotal + quantity > 40) {
+                return res.status(400).json({ status: "failed", message: "Your cart is full!" });
+            }
+            let addMsg = null;
+            if (quantity > 1) {
+                addMsg = `${quantity} products added to cart!`;
+            } else {
+                addMsg = `${quantity} product added to cart!`;
+            }
+            const existingItem = user.cart.find(
+                item => item.productId.toString() === productId && item.color === color && item.size === size
+            );
+            if (existingItem) {
+                existingItem.quantity += quantity;
+            } else {
+                user.cart.push({ productId, quantity, color, size });
+            }
+            await user.save();
+            const totalQuantity = user.cart.reduce((total, item) => total + item.quantity, 0);
+
+            return res.status(200).json({ status: "success", message: addMsg, totalQuantity });
+
+        } catch (error) {
+            return res.status(500).json({ status: "failed", message: "Server error, please try again later!" });
+        }
+    };
+
+    static getCart = async (req, res) => {
+        try {
+            const userId = req.user._id;
+            const user = await User.findById(userId).populate("cart.productId", "title salePrice stocks images");
+            if (!user || user.cart.length === 0) {
+                return res.status(200).json({ status: "success", message: "Cart is empty!", cart: [] });
+            }
+            let totalQuantity = 0;
+            const formattedCart = user.cart.map(item => {
+                totalQuantity += item.quantity;
+                return {
+                    _id: item._id,
+                    productId: item.productId ? item.productId._id : null,
+                    title: item.productId ? item.productId.title : "Unknown Product",
+                    salePrice: item.productId ? item.productId.salePrice : 0,
+                    stocks: item.productId ? item.productId.stocks : 0,
+                    image: item.productId && item.productId.images && item.productId.images.length > 0 ? item.productId.images[0] : null,
+                    quantity: item.quantity,
+                    color: item.color,
+                    size: item.size,
+                };
+            });
+
+            return res.status(200).json({ status: "success", cart: formattedCart, totalQuantity });
+
+        } catch (error) {
+            return res.status(500).json({ status: "failed", message: "Server error, please try again later!" });
+        }
+    };
+
+    static adjustCartQuantity = async (req, res) => {
+        try {
+            const { cartItemId } = req.params;
+            const { action } = req.body;
+            const userId = req.user._id;
+
+            if (!['increase', 'decrease'].includes(action)) {
+                return res.status(400).json({ status: "failed", message: "Invalid action! Use 'increase' or 'decrease'!" });
+            }
+            const user = await User.findById(userId);
+            if (!user) {
+                return res.status(404).json({ status: "failed", message: "User not found!" });
+            }
+            const cartItem = user.cart.id(cartItemId);
+            if (!cartItem) {
+                return res.status(404).json({ status: "failed", message: "Cart item not found!" });
+            }
+            const currentTotal = user.cart.reduce((total, item) => total + item.quantity, 0);
+            if (currentTotal >= 40) {
+                return res.status(400).json({ status: "failed", message: "Your cart is full!" });
+            }
+            if (action === 'increase') {
+                cartItem.quantity += 1;
+            } else {
+                cartItem.quantity = Math.max(1, cartItem.quantity - 1);
+            }
+
+            await user.save();
+
+            const updatedUser = await User.findById(userId).populate("cart.productId", "title salePrice stocks images");
+            let totalQuantity = 0;
+            const formattedCart = updatedUser.cart.map(item => {
+                totalQuantity += item.quantity;
+                return {
+                    _id: item._id,
+                    productId: item.productId ? item.productId._id : null,
+                    title: item.productId ? item.productId.title : "Unknown Product",
+                    salePrice: item.productId ? item.productId.salePrice : 0,
+                    stocks: item.productId ? item.productId.stocks : 0,
+                    image: item.productId && item.productId.images && item.productId.images.length > 0 ? item.productId.images[0] : null,
+                    quantity: item.quantity,
+                    color: item.color,
+                    size: item.size,
+                };
+            });
+
+            return res.status(200).json({ status: "success", cart: formattedCart, totalQuantity });
+
+        } catch (error) {
+            return res.status(500).json({ status: "failed", message: "Server error, please try again later!" });
+        }
+    };
+
+    static removeFromCart = async (req, res) => {
+        try {
+            const { productId, color, size } = req.body;
+            const userId = req.user._id;
+            if (!productId || !color || !size) {
+                return res.status(400).json({ status: "failed", message: "Something went wrong!" });
+            }
+            const user = await User.findById(userId);
+            if (!user) {
+                return res.status(404).json({ status: "failed", message: "User not found!" });
+            }
+            const cartItemIndex = user.cart.findIndex(item =>
+                item.productId.toString() === productId &&
+                item.color === color &&
+                item.size === size
+            );
+            if (cartItemIndex === -1) {
+                return res.status(404).json({ status: "failed", message: "Cart item not found!" });
+            }
+            user.cart.splice(cartItemIndex, 1);
+            await user.save();
+
+            const updatedUser = await User.findById(userId).populate("cart.productId", "title salePrice stocks images");
+            let totalQuantity = 0;
+            const formattedCart = updatedUser.cart.map(item => {
+                totalQuantity += item.quantity;
+                return {
+                    _id: item._id,
+                    productId: item.productId ? item.productId._id : null,
+                    title: item.productId ? item.productId.title : "Unknown Product",
+                    salePrice: item.productId ? item.productId.salePrice : 0,
+                    stocks: item.productId ? item.productId.stocks : 0,
+                    image: item.productId && item.productId.images && item.productId.images.length > 0 ? item.productId.images[0] : null,
+                    quantity: item.quantity,
+                    color: item.color,
+                    size: item.size,
+                };
+            });
+
+            return res.status(200).json({ status: "success", message: "Product removed from cart.", cart: formattedCart, totalQuantity });
 
         } catch (error) {
             return res.status(500).json({ status: "failed", message: "Server error, please try again later!" });

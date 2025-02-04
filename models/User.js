@@ -106,7 +106,7 @@ const categorySchema = new mongoose.Schema({
         type: String,
         required: true,
         trim: true
-    }, 
+    },
     categoryImage: {
         type: String,
         trim: true
@@ -153,6 +153,28 @@ const addressSchema = new mongoose.Schema({
     }
 });
 
+// Cart schema
+const cartSchema = new mongoose.Schema({
+    productId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Product",
+        required: true
+    },
+    quantity: {
+        type: Number,
+        required: true,
+        min: 1
+    },
+    color: {
+        type: String,
+        required: true
+    },
+    size: {
+        type: String,
+        required: true
+    }
+});
+
 // User schema
 const userSchema = new mongoose.Schema({
     firstName: {
@@ -192,7 +214,8 @@ const userSchema = new mongoose.Schema({
     otpExpiry: {
         type: Date,
     },
-    addresses: [addressSchema]
+    addresses: [addressSchema],
+    cart: [cartSchema]
 });
 
 // Models
