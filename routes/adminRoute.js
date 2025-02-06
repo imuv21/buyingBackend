@@ -9,6 +9,8 @@ const router = express.Router();
 
 // Admin routes
 router.use(authedUser);
+router.get('/get-users', isAdmin, userCont.getUsers);
+router.get('/get-orders', isAdmin, userCont.getOrders);
 router.get('/get-tags', isAdmin, userCont.getTags);
 router.post('/add-category', isAdmin, upload.single('categoryImage'), userCont.addCategory);
 router.delete('/delete-category/:categoryId', isAdmin, userCont.deleteCategory);

@@ -1,13 +1,15 @@
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+import Razorpay from 'razorpay';
 import { v2 as cloudinary } from 'cloudinary';
 import { validationResult } from "express-validator";
-import { User, Product, Category, Tag } from '../models/User.js';
+import { User, Product, Category, Tag, Order } from '../models/User.js';
 import sendMail from '../middlewares/sendMail.js';
 import dotenv from 'dotenv';
 dotenv.config();
 
+const FRONTEND_URL = process.env.FRONTEND_URL;
 
 //Cloudinary
 cloudinary.config({
@@ -40,6 +42,11 @@ const uploadCatPosters = (buffer) => {
     });
 };
 
+//Razorpay
+const instance = new Razorpay({
+    key_id: process.env.RAZORPAY_API_KEY,
+    key_secret: process.env.RAZORPAY_API_SECRET,
+});
 
 class userCont {
 
@@ -611,7 +618,7 @@ class userCont {
     };
 
 
-    //admin product & cart conts
+    //product & cart conts
 
     static addProduct = async (req, res) => {
 
@@ -923,6 +930,184 @@ class userCont {
             return res.status(500).json({ status: "failed", message: "Server error, please try again later!" });
         }
     };
+
+
+    //payment conts
+
+    static getKey = async (req, res) => {
+        return res.status(200).json({ key: process.env.RAZORPAY_API_KEY });
+    };
+
+    static placeOrder = async (req, res) => {
+
+        const { addressId } = req.body;
+        try {
+            const userId = req.user._id;
+            const user = await User.findById(userId).populate("cart.productId", "title salePrice images");
+            if (!user || !user.cart.length) {
+                return res.status(400).json({ status: "failed", message: "Cart is empty!" });
+            }
+            const address = user.addresses.id(addressId);
+            if (!address) {
+                return res.status(400).json({ status: "failed", message: "Invalid address id provided!" });
+            }
+
+            const items = user.cart.map(item => ({
+                productId: item.productId ? item.productId._id : null,
+                title: item.productId ? item.productId.title : "Unknown Product",
+                salePrice: item.productId ? item.productId.salePrice : 0,
+                quantity: item.quantity,
+                color: item.color,
+                size: item.size,
+                image: item.productId && item.productId.images && item.productId.images.length > 0 ? item.productId.images[0] : null,
+            }));
+
+            const totalAmount = items.reduce((sum, item) => sum + item.salePrice * item.quantity, 0);
+            if (!totalAmount || totalAmount <= 0) {
+                return res.status(400).json({ status: "failed", message: "Invalid total amount!" });
+            }
+            const options = {
+                amount: Math.round(totalAmount * 100),
+                currency: 'INR'
+            };
+
+            const payment = await instance.orders.create(options);
+            if (payment) {
+                const newOrder = new Order({ userId, items, totalAmount, address, status: "Created" });
+                await newOrder.save();
+
+                return res.status(200).json({ status: "success", message: "Order created. Awaiting payment...", payment });
+            } else {
+                return res.status(400).json({ status: "failed", message: "Order creation failed!" });
+            }
+        } catch (error) {
+            return res.status(500).json({ status: "failed", message: "Server error. Please try again later!" });
+        }
+    };
+
+    static paymentVerification = async (req, res) => {
+        try {
+            const { userId } = req.query;
+            const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+            if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+                return res.status(400).json({ status: "failed", message: "Razorpay credentials are missing!" });
+            }
+            if (!userId) {
+                return res.status(401).json({ status: "failed", message: "Unauthorized user, no token provided!" });
+            }
+
+            const body = `${razorpay_order_id}|${razorpay_payment_id}`;
+            const expectedSignature = crypto.createHmac('sha256', process.env.RAZORPAY_API_SECRET).update(body).digest('hex');
+            const isAuthentic = expectedSignature === razorpay_signature;
+            if (isAuthentic) {
+                const order = await Order.findOne({ userId, status: "Created" });
+                if (!order) {
+                    return res.status(404).json({ status: "failed", message: "Order not found!" });
+                }
+
+                for (const item of order.items) {
+                    const product = await Product.findById(item.productId);
+                    if (product) {
+                        product.stocks -= item.quantity;
+                        if (product.stocks < 0) {
+                            product.stocks = 0;
+                        }
+                        product.inStock = product.stocks > 0;
+                        product.boughtCounter += item.quantity;
+
+                        await product.save();
+                    }
+                }
+                order.status = "Placed";
+                await order.save();
+                await User.findByIdAndUpdate(userId, { cart: [] });
+
+                return res.redirect(`${FRONTEND_URL}/payment-success?reference=${razorpay_payment_id}`);
+            } else {
+                return res.status(400).json({ status: "failed", message: "Payment verification failed!" });
+            }
+        } catch (error) {
+            return res.status(500).json({ status: "failed", message: "Server error. Please try again later!" });
+        }
+    };
+
+
+    //admin
+
+    static getUsers = async (req, res) => {
+        try {
+            let { page = 1, size = 10, search = "", role = "", sortBy = "firstName", order = "asc" } = req.query;
+            page = Math.max(1, parseInt(page));
+            size = Math.max(1, parseInt(size));
+
+            const filter = { role };
+            if (search) {
+                filter.$or = [
+                    { firstName: { $regex: search, $options: "i" } },
+                    { lastName: { $regex: search, $options: "i" } },
+                    { email: { $regex: search, $options: "i" } }
+                ];
+            }
+
+            const sortOptions = {
+                firstName: { firstName: order === "asc" ? 1 : -1 },
+                email: { email: order === "asc" ? 1 : -1 }
+            };
+            const sortCriteria = sortOptions[sortBy] || { firstName: 1 };
+
+            const totalUsers = await User.countDocuments(filter);
+            const users = await User.find(filter).select('-password -isVerified -addresses -cart -role')
+                .skip((page - 1) * size).limit(size).sort(sortCriteria).lean().exec();
+
+            const totalPages = Math.ceil(totalUsers / size);
+            const pageUsers = users.length;
+            const isFirst = page === 1;
+            const isLast = page === totalPages || totalPages === 0;
+            const hasNext = page < totalPages;
+            const hasPrevious = page > 1;
+
+            return res.status(200).json({ status: "success", users, totalUsers, totalPages, pageUsers, isFirst, isLast, hasNext, hasPrevious });
+
+        } catch (error) {
+            return res.status(500).json({ status: "failed", message: "Server error. Please try again later!" });
+        }
+    }
+
+    static getOrders = async (req, res) => {
+        try {
+            let { page = 1, size = 10, sortBy = "orderDate", order = "asc" } = req.query;
+            page = Math.max(1, parseInt(page));
+            size = Math.max(1, parseInt(size));
+
+            const filter = { status: "Placed" };
+            const sortOptions = {
+                totalAmount: { totalAmount: order === "asc" ? 1 : -1 },
+                orderDate: { orderDate: order === "asc" ? 1 : -1 }
+            };
+            const sortCriteria = sortOptions[sortBy] || { orderDate: 1 };
+
+            const totalOrders = await Order.countDocuments(filter);
+            const ordersRaw = await Order.find(filter).select('-userId -address -orderDate -__v')
+                .skip((page - 1) * size).limit(size).sort(sortCriteria).lean().exec();
+            const orders = ordersRaw.map(order => {
+                const { items, ...rest } = order;
+                const itemsCount = items.reduce((total, item) => total + item.quantity, 0);
+                return { ...rest, itemsCount };
+            });
+
+            const totalPages = Math.ceil(totalOrders / size);
+            const pageOrders = orders.length;
+            const isFirst = page === 1;
+            const isLast = page === totalPages || totalPages === 0;
+            const hasNext = page < totalPages;
+            const hasPrevious = page > 1;
+
+            return res.status(200).json({ status: "success", orders, totalOrders, totalPages, pageOrders, isFirst, isLast, hasNext, hasPrevious });
+
+        } catch (error) {
+            return res.status(500).json({ status: "failed", message: "Server error. Please try again later!" });
+        }
+    }
 
 }
 

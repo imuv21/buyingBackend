@@ -13,6 +13,7 @@ router.post('/verify-otp', userCont.verifyOtp);
 router.post('/login', loginValidator, userCont.userLogin);
 router.post('/forgot-password', rateLimiter({ windowMs: 60 * 60 * 1000, max: 10 }), forgotPasswordValidator, userCont.forgotPassword);
 router.post('/verify-password-otp', verifyPasswordOtpValidator, userCont.verifyPasswordOtp);
+router.post('/payment-verification', userCont.paymentVerification);
 
 // For both
 router.get('/get-category', userCont.getCategories);
@@ -33,6 +34,9 @@ router.post('/add-to-cart', userCont.addToCart);
 router.get('/get-cart', userCont.getCart);
 router.put('/cart-quantity/:cartItemId', userCont.adjustCartQuantity);
 router.delete('/remove-from-cart', userCont.removeFromCart);
+
+router.get('/get-key', userCont.getKey);
+router.post('/place-order', userCont.placeOrder);
 
 
 // router.post('/signup', rateLimiter({ windowMs: 60 * 60 * 1000, max: 10 }), upload.single('image'), signupValidator, userCont.userSignup);

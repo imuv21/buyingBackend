@@ -175,6 +175,64 @@ const cartSchema = new mongoose.Schema({
     }
 });
 
+// Order schema
+const orderSchema = new mongoose.Schema({
+    userId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        required: true
+    },
+    items: [{
+        productId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Product",
+            required: true
+        },
+        title: {
+            type: String,
+            required: true
+        },
+        salePrice: {
+            type: Number,
+            required: true
+        },
+        quantity: {
+            type: Number,
+            required: true,
+            min: 1
+        },
+        color: {
+            type: String,
+            required: true
+        },
+        size: {
+            type: String,
+            required: true
+        },
+        image: {
+            type: String,
+            required: true
+        }
+    }],
+    totalAmount: {
+        type: Number,
+        required: true
+    },
+    address: {
+        type: addressSchema,
+        required: true
+    },
+    status: {
+        type: String,
+        enum: ["Created", "Placed", "Shipped", "Delivered", "Cancelled"],
+        default: "Created"
+    },
+    orderDate: {
+        type: Date,
+        default: Date.now
+    }
+});
+
 // User schema
 const userSchema = new mongoose.Schema({
     firstName: {
@@ -223,5 +281,6 @@ const User = mongoose.model("User", userSchema);
 const Product = mongoose.model("Product", productSchema);
 const Category = mongoose.model("Category", categorySchema);
 const Tag = mongoose.model("Tag", tagSchema);
+const Order = mongoose.model("Order", orderSchema);
 
-export { User, Product, Category, Tag };
+export { User, Product, Category, Tag, Order };
