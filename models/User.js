@@ -58,6 +58,10 @@ const productSchema = new mongoose.Schema({
         type: Boolean,
         default: true
     },
+    isFeatured: {
+        type: Boolean,
+        default: false
+    },
     boughtCounter: {
         type: Number,
         default: 0

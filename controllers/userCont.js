@@ -278,6 +278,9 @@ class userCont {
         }
     }
 
+
+    //address
+
     static addAddress = async (req, res) => {
 
         const errors = validationResult(req);
@@ -384,6 +387,9 @@ class userCont {
         }
     };
 
+
+    //reviews
+
     static addReview = async (req, res) => {
 
         const errors = validationResult(req);
@@ -486,55 +492,80 @@ class userCont {
         }
     };
 
-    static deleteReviewAdmin = async (req, res) => {
+    static getReviewsAdmin = async (req, res) => {
         try {
-            const { productId, reviewId, userId } = req.body;
+            let { page = 1, size = 10, sortBy = "createdAt", order = "desc" } = req.query;
+            page = Math.max(1, parseInt(page));
+            size = Math.max(1, parseInt(size));
 
-            if (!productId || !reviewId || !userId) {
-                return res.status(400).json({ status: "failed", message: "Product Id, Review Id and User Id are required!" });
-            }
-            const product = await Product.findById(productId);
-            if (!product) {
-                return res.status(404).json({ status: "failed", message: "Product not found!" });
-            }
-            const reviewIndex = product.reviews.findIndex(
-                (review) => review._id.toString() === reviewId && review.userId.toString() === userId
+            const sortOptions = {
+                "createdAt": { createdAt: order === "asc" ? 1 : -1 },
+                "rating": { rating: order === "asc" ? 1 : -1 }
+            };
+            const sortCriteria = sortOptions[sortBy] || { createdAt: -1 };
+
+            const aggregationPipeline = [
+                { $unwind: "$reviews" },
+                {
+                    $facet: {
+                        metadata: [{ $count: "total" }],
+                        data: [
+                            {
+                                $project: {
+                                    reviewId: "$reviews._id",
+                                    productTitle: "$title",
+                                    review: "$reviews.review",
+                                    rating: "$reviews.rating",
+                                    userId: "$reviews.userId",
+                                    createdAt: "$reviews.createdAt"
+                                }
+                            },
+                            { $sort: sortCriteria },
+                            { $skip: (page - 1) * size },
+                            { $limit: size }
+                        ]
+                    }
+                },
+                {
+                    $project: {
+                        totalReviews: { $ifNull: [{ $arrayElemAt: ["$metadata.total", 0] }, 0] },
+                        reviews: "$data"
+                    }
+                }
+            ];
+
+            const result = await Product.aggregate(aggregationPipeline);
+            const { totalReviews, reviews } = result[0] || { totalReviews: 0, reviews: [] };
+
+            const totalPages = Math.ceil(totalReviews / size);
+            const pageReviews = reviews.length;
+            const isFirst = page === 1;
+            const isLast = page === totalPages || totalPages === 0;
+            const hasNext = page < totalPages;
+            const hasPrevious = page > 1;
+
+            return res.status(200).json({ status: "success", reviews, totalReviews, totalPages, pageReviews, isFirst, isLast, hasNext, hasPrevious });
+        } catch (error) {
+            return res.status(500).json({ status: "failed", message: "Server error, please try again later!" });
+        }
+    };
+
+    static deleteReview = async (req, res) => {
+        try {
+            const { productId, reviewId } = req.params;
+
+            const result = await Product.updateOne(
+                { _id: productId, "reviews._id": reviewId },
+                { $pull: { reviews: { _id: reviewId } } }
             );
-            if (reviewIndex === -1) {
-                return res.status(403).json({ status: "failed", message: "Review not found or does not belong to the user!" });
+            if (result.modifiedCount === 0) {
+                return res.status(404).json({ status: "failed", message: "Review not found!" });
             }
-
-            const reviewToDelete = product.reviews[reviewIndex];
-
-            product.reviews.splice(reviewIndex, 1);
-            switch (reviewToDelete.rating) {
-                case 1:
-                    product.oneStar -= 1;
-                    break;
-                case 2:
-                    product.twoStar -= 1;
-                    break;
-                case 3:
-                    product.threeStar -= 1;
-                    break;
-                case 4:
-                    product.fourStar -= 1;
-                    break;
-                case 5:
-                    product.fiveStar -= 1;
-                    break;
-                default:
-                    break;
-            }
-
-            const totalRatings = product.oneStar + product.twoStar + product.threeStar + product.fourStar + product.fiveStar;
-            const totalScore = product.oneStar * 1 + product.twoStar * 2 + product.threeStar * 3 + product.fourStar * 4 + product.fiveStar * 5;
-            product.averageRating = totalRatings > 0 ? parseFloat((totalScore / totalRatings).toFixed(1)) : 0;
-            await product.save();
 
             return res.status(200).json({ status: "success", message: "Review deleted successfully." });
+
         } catch (error) {
-            return res.status(500).json({ status: "failed", message: "Server error, Please try again later!" });
+            return res.status(500).json({ status: "failed", message: "Server error, please try again later!" });
         }
     };
 
@@ -592,12 +623,30 @@ class userCont {
 
     static getCategories = async (req, res) => {
         try {
-            const categories = await Category.find();
+            let { page = 1, size = 10, sortBy = "categoryName", order = "desc" } = req.query;
+            page = Math.max(1, parseInt(page));
+            size = Math.max(1, parseInt(size));
+
+            const sortOptions = {
+                "categoryName": { categoryName: order === "asc" ? 1 : -1 },
+            };
+            const sortCriteria = sortOptions[sortBy] || { categoryName: -1 };
+
+            const totalCategories = await Category.countDocuments();
+            const categories = await Category.find().skip((page - 1) * size).limit(size).sort(sortCriteria).lean().exec();
+
             if (categories.length === 0) {
                 return res.status(404).json({ status: "failed", message: "No categories found!" });
             }
 
-            return res.status(200).json({ status: "success", categories });
+            const totalPages = Math.ceil(totalCategories / size);
+            const pageCategories = categories.length;
+            const isFirst = page === 1;
+            const isLast = page === totalPages || totalPages === 0;
+            const hasNext = page < totalPages;
+            const hasPrevious = page > 1;
+
+            return res.status(200).json({ status: "success", categories, totalCategories, totalPages, pageCategories, isFirst, isLast, hasNext, hasPrevious });
 
         } catch (error) {
             return res.status(500).json({ status: "failed", message: "Server error, Please try again later!" });
@@ -613,12 +662,12 @@ class userCont {
             return res.status(200).json({ status: 'success', tags });
 
         } catch (error) {
-            return res.status(500).json({ status: 'failed', message: 'Server error, Please try again later!' });
+            return res.status(500).json({ status: "failed", message: "Server error, Please try again later!" });
         }
     };
 
 
-    //product & cart conts
+    //product conts
 
     static addProduct = async (req, res) => {
 
@@ -653,6 +702,80 @@ class userCont {
         }
     };
 
+    static editProduct = async (req, res) => {
+
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ status: "failed", errors: errors.array() });
+        }
+
+        try {
+            const { productId } = req.params;
+            const { tags, title, category, originalPrice, salePrice, stocks, information } = req.body;
+
+            const product = await Product.findById(productId);
+            if (!product) {
+                return res.status(404).json({ status: "failed", message: "Product not found!" });
+            }
+
+            const updateFields = {};
+            if (title && title !== product.title) {
+                updateFields.title = title;
+            }
+            if (category && category !== product.category) {
+                updateFields.category = category;
+            }
+            if (originalPrice && Number(originalPrice) !== product.originalPrice) {
+                updateFields.originalPrice = originalPrice;
+            }
+            if (salePrice && Number(salePrice) !== product.salePrice) {
+                updateFields.salePrice = salePrice;
+            }
+            if (information && information !== product.information) {
+                updateFields.information = information;
+            }
+            if (stocks !== undefined && Number(stocks) !== product.stocks) {
+                updateFields.stocks = stocks;
+                updateFields.inStock = Number(stocks) > 0;
+            }
+
+            if (tags) {
+                const newTags = tags;
+                const existingTags = await Tag.find({ tagName: { $in: newTags } });
+                const existingTagNames = existingTags.map((tag) => tag.tagName);
+                const newTagNames = newTags.filter((tag) => !existingTagNames.includes(tag));
+                if (newTagNames.length > 0) {
+                    const tagsToInsert = newTagNames.map((tag) => new Tag({ tagName: tag }));
+                    await Tag.insertMany(tagsToInsert);
+                }
+                updateFields.tags = [...existingTagNames, ...newTagNames];
+            }
+
+            if (req.body.imagesToRemove && Array.isArray(req.body.imagesToRemove)) {
+                product.images = product.images.filter(img => !req.body.imagesToRemove.includes(img));
+                const deleteImagePromises = req.body.imagesToRemove.map((imageUrl) => {
+                    const publicId = imageUrl.split("/").pop().split(".")[0];
+                    return cloudinary.uploader.destroy(`Buying/Products/${publicId}`);
+                });
+                await Promise.all(deleteImagePromises);
+            }
+            if (req.files && req.files.length > 0) {
+                const imageUploadPromises = req.files.map((file) => uploadPosters(file.buffer));
+                const uploadedImageUrls = await Promise.all(imageUploadPromises);
+                updateFields.images = [...product.images, ...uploadedImageUrls];
+            }
+
+            const updatedProduct = await Product.findByIdAndUpdate(productId,
+                { $set: updateFields },
+                { new: true }
+            );
+
+            return res.status(200).json({ status: "success", message: "Product updated successfully.", data: updatedProduct });
+        } catch (error) {
+            return res.status(500).json({ status: "failed", message: "Server error, please try again later!" });
+        }
+    };
+
     static getProducts = async (req, res) => {
         try {
             let { page = 1, size = 10, search = "", category = "", sortBy = "salePrice", order = "asc" } = req.query;
@@ -678,7 +801,7 @@ class userCont {
 
             const totalProducts = await Product.countDocuments(filter);
             const products = await Product.find(filter)
-                .select('_id title originalPrice salePrice stocks averageRating images')
+                .select('_id title originalPrice salePrice stocks averageRating images isFeatured')
                 .skip((page - 1) * size).limit(size).sort(sortCriteria).lean().exec();
 
             const transformedProducts = products.map(product => ({
@@ -710,32 +833,15 @@ class userCont {
             if (!product) {
                 return res.status(404).json({ status: "failed", message: "Product not found!" });
             }
-
             const deleteImagePromises = product.images.map((imageUrl) => {
                 const publicId = imageUrl.split("/").pop().split(".")[0];
                 return cloudinary.uploader.destroy(`Buying/Products/${publicId}`);
             });
             await Promise.all(deleteImagePromises);
-
-            const reviewImageDeletePromises = product.reviews.flatMap((review) =>
-                review.images.map((imageUrl) => {
-                    const publicId = imageUrl.split("/").pop().split(".")[0];
-                    return cloudinary.uploader.destroy(`Buying/Reviews/${publicId}`);
-                })
-            );
-            await Promise.all(reviewImageDeletePromises);
-
-            const userUpdatePromises = product.reviews.map((review) =>
-                User.findByIdAndUpdate(review.userId, {
-                    $pull: {
-                        reviewedProducts: { productId },
-                    },
-                })
-            );
-            await Promise.all(userUpdatePromises);
             await Product.findByIdAndDelete(productId);
 
-            return res.status(200).json({ status: "success", message: "Product and associated reviews deleted successfully." });
+            return res.status(200).json({ status: "success", message: "Product deleted successfully." });
+
         } catch (error) {
             return res.status(500).json({ status: "failed", message: "Server error, please try again later!" });
         }
@@ -757,6 +863,95 @@ class userCont {
             return res.status(500).json({ status: "failed", message: "Server error, please try again later!" });
         }
     };
+
+    //featured product conts
+
+    static addToFeaturedProducts = async (req, res) => {
+        try {
+            const { productId } = req.params;
+            if (!productId) {
+                return res.status(400).json({ status: "failed", message: "Product ID is required!" });
+            }
+            const product = await Product.findById(productId);
+            if (!product) {
+                return res.status(404).json({ status: "failed", message: "Product not found!" });
+            }
+            if (product.isFeatured) {
+                return res.status(400).json({ status: "failed", message: "Product is already featured!" });
+            }
+            product.isFeatured = true;
+            await product.save();
+
+            return res.status(200).json({ status: "success", message: "Product added to featured products." });
+
+        } catch (error) {
+            return res.status(500).json({ status: "failed", message: "Server error, please try again later!" });
+        }
+    };
+
+    static removeFromFeaturedProducts = async (req, res) => {
+        try {
+            const { productId } = req.params;
+            if (!productId) {
+                return res.status(400).json({ status: "failed", message: "Product ID is required!" });
+            }
+            const product = await Product.findById(productId);
+            if (!product) {
+                return res.status(404).json({ status: "failed", message: "Product not found!" });
+            }
+            if (!product.isFeatured) {
+                return res.status(400).json({ status: "failed", message: "Product is not featured!" });
+            }
+            product.isFeatured = false;
+            await product.save();
+
+            return res.status(200).json({ status: "success", message: "Product removed from featured products." });
+
+        } catch (error) {
+            return res.status(500).json({ status: "failed", message: "Server error, please try again later!" });
+        }
+    };
+
+    static getFeaturedProducts = async (req, res) => {
+        try {
+            let { page = 1, size = 10, sortBy = "salePrice", order = "asc" } = req.query;
+            page = Math.max(1, parseInt(page));
+            size = Math.max(1, parseInt(size));
+
+            const filter = { isFeatured: true };
+            const sortOptions = {
+                "salePrice": { salePrice: order === "asc" ? 1 : -1 },
+                "title": { title: order === "asc" ? 1 : -1 },
+                "averageRating": { averageRating: order === "asc" ? 1 : -1 }
+            };
+            const sortCriteria = sortOptions[sortBy] || { salePrice: 1 };
+
+            const totalProducts = await Product.countDocuments(filter);
+            const products = await Product.find(filter)
+                .select('_id title originalPrice salePrice stocks averageRating images')
+                .skip((page - 1) * size).limit(size).sort(sortCriteria).lean().exec();
+
+            const transformedProducts = products.map(product => ({
+                ...product,
+                images: product.images.slice(0, 2)
+            }));
+
+            const totalPages = Math.ceil(totalProducts / size);
+            const pageProducts = transformedProducts.length;
+            const isFirst = page === 1;
+            const isLast = page === totalPages || totalPages === 0;
+            const hasNext = page < totalPages;
+            const hasPrevious = page > 1;
+
+            return res.status(200).json({ status: "success", products: transformedProducts, totalProducts, totalPages, pageProducts, isFirst, isLast, hasNext, hasPrevious });
+
+        } catch (error) {
+            return res.status(500).json({ status: "failed", message: "Server error, Please try again later!" });
+        }
+    };
+
+
+    //cart conts
 
     static addToCart = async (req, res) => {
         try {
@@ -932,7 +1127,7 @@ class userCont {
     };
 
 
-    //payment conts
+    //payment & order conts
 
     static getKey = async (req, res) => {
         return res.status(200).json({ key: process.env.RAZORPAY_API_KEY });
@@ -981,7 +1176,7 @@ class userCont {
                 return res.status(400).json({ status: "failed", message: "Order creation failed!" });
             }
         } catch (error) {
-            return res.status(500).json({ status: "failed", message: "Server error. Please try again later!" });
+            return res.status(500).json({ status: "failed", message: "Server error, Please try again later!" });
         }
     };
 
@@ -1027,9 +1222,50 @@ class userCont {
                 return res.status(400).json({ status: "failed", message: "Payment verification failed!" });
             }
         } catch (error) {
-            return res.status(500).json({ status: "failed", message: "Server error. Please try again later!" });
+            return res.status(500).json({ status: "failed", message: "Server error, Please try again later!" });
         }
     };
+
+    static getUserOrders = async (req, res) => {
+        try {
+            let { page = 1, size = 10, status, sortBy = "orderDate", order = "desc" } = req.query;
+            page = Math.max(1, parseInt(page));
+            size = Math.max(1, parseInt(size));
+
+            const filter = { userId: req.user._id };
+            if (status) {
+                filter.status = status;
+            } else {
+                filter.status = { $ne: "Created" };
+            }
+            const sortOptions = {
+                totalAmount: { totalAmount: order === "asc" ? 1 : -1 },
+                orderDate: { orderDate: order === "asc" ? 1 : -1 }
+            };
+            const sortCriteria = sortOptions[sortBy] || { orderDate: -1 };
+
+            const totalOrders = await Order.countDocuments(filter);
+            const ordersRaw = await Order.find(filter).select('-userId -address -__v')
+                .skip((page - 1) * size).limit(size).sort(sortCriteria).lean().exec();
+            const orders = ordersRaw.map(order => {
+                const { items, ...rest } = order;
+                const itemsCount = items.reduce((total, item) => total + item.quantity, 0);
+                return { ...rest, itemsCount };
+            });
+
+            const totalPages = Math.ceil(totalOrders / size);
+            const pageOrders = orders.length;
+            const isFirst = page === 1;
+            const isLast = page === totalPages || totalPages === 0;
+            const hasNext = page < totalPages;
+            const hasPrevious = page > 1;
+
+            return res.status(200).json({ status: "success", orders, totalOrders, totalPages, pageOrders, isFirst, isLast, hasNext, hasPrevious });
+
+        } catch (error) {
+            return res.status(500).json({ status: "failed", message: "Server error, please try again later!" });
+        }
+    }
 
 
     //admin
@@ -1069,22 +1305,22 @@ class userCont {
             return res.status(200).json({ status: "success", users, totalUsers, totalPages, pageUsers, isFirst, isLast, hasNext, hasPrevious });
 
         } catch (error) {
-            return res.status(500).json({ status: "failed", message: "Server error. Please try again later!" });
+            return res.status(500).json({ status: "failed", message: "Server error, Please try again later!" });
         }
     }
 
     static getOrders = async (req, res) => {
         try {
-            let { page = 1, size = 10, sortBy = "orderDate", order = "asc" } = req.query;
+            let { page = 1, size = 10, status, sortBy = "orderDate", order = "desc" } = req.query;
             page = Math.max(1, parseInt(page));
             size = Math.max(1, parseInt(size));
 
-            const filter = { status: "Placed" };
+            const filter = status ? { status } : { status: { $ne: "Created" } };
             const sortOptions = {
                 totalAmount: { totalAmount: order === "asc" ? 1 : -1 },
                 orderDate: { orderDate: order === "asc" ? 1 : -1 }
             };
-            const sortCriteria = sortOptions[sortBy] || { orderDate: 1 };
+            const sortCriteria = sortOptions[sortBy] || { orderDate: -1 };
 
             const totalOrders = await Order.countDocuments(filter);
             const ordersRaw = await Order.find(filter).select('-userId -address -orderDate -__v')
@@ -1105,10 +1341,50 @@ class userCont {
             return res.status(200).json({ status: "success", orders, totalOrders, totalPages, pageOrders, isFirst, isLast, hasNext, hasPrevious });
 
         } catch (error) {
-            return res.status(500).json({ status: "failed", message: "Server error. Please try again later!" });
+            return res.status(500).json({ status: "failed", message: "Server error, Please try again later!" });
         }
     }
 
+    static getOrderDetails = async (req, res) => {
+        try {
+            const { orderId } = req.params;
+            const orderDetails = await Order.findById(orderId);
+            if (!orderDetails) {
+                return res.status(404).json({ status: "failed", message: "Order not found!" });
+            }
+
+            return res.status(200).json({ status: "success", orderDetails });
+
+        } catch (error) {
+            return res.status(500).json({ status: "failed", message: "Server error, please try again later!" });
+        }
+    };
+
+    static updateOrderStatus = async (req, res) => {
+        try {
+            const { orderId } = req.params;
+            const { status } = req.body;
+
+            if (!status || !orderId) {
+                return res.status(400).json({ status: "failed", message: "Status and order id are required!" });
+            }
+            const allowedStatuses = ["Placed", "Shipped", "Delivered", "Cancelled"];
+            if (!allowedStatuses.includes(status)) {
+                return res.status(400).json({ status: "failed", message: "Invalid status value provided!" });
+            }
+            const order = await Order.findById(orderId);
+            if (!order) {
+                return res.status(404).json({ status: "failed", message: "Order not found!" });
+            }
+            order.status = status;
+            await order.save();
+
+            return res.status(200).json({ status: "success", message: "Order status updated successfully." });
+
+        } catch (error) {
+            return res.status(500).json({ status: "failed", message: "Server error, Please try again later!" });
+        }
+    };
 }
 
 export default userCont;

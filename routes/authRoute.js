@@ -20,6 +20,8 @@ router.get('/get-category', userCont.getCategories);
 router.get('/get-products', userCont.getProducts);
 router.get('/get-product-details/:productId', userCont.getProductDetails);
 router.get('/get-reviews/:productId', userCont.getReviews);
+router.get('/get-order-details/:orderId', userCont.getOrderDetails);
+router.get('/get-featured', userCont.getFeaturedProducts);
 
 // Private routes
 router.use(authedUser);
@@ -37,6 +39,7 @@ router.delete('/remove-from-cart', userCont.removeFromCart);
 
 router.get('/get-key', userCont.getKey);
 router.post('/place-order', userCont.placeOrder);
+router.get('/get-user-orders', userCont.getUserOrders);
 
 
 // router.post('/signup', rateLimiter({ windowMs: 60 * 60 * 1000, max: 10 }), upload.single('image'), signupValidator, userCont.userSignup);
