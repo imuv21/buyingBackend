@@ -795,13 +795,14 @@ class userCont {
             const sortOptions = {
                 "salePrice": { salePrice: order === "asc" ? 1 : -1 },
                 "title": { title: order === "asc" ? 1 : -1 },
-                "averageRating": { averageRating: order === "asc" ? 1 : -1 }
+                "averageRating": { averageRating: order === "asc" ? 1 : -1 },
+                "boughtCounter": { boughtCounter: order === "asc" ? 1 : -1 }
             };
             const sortCriteria = sortOptions[sortBy] || { salePrice: 1 };
 
             const totalProducts = await Product.countDocuments(filter);
             const products = await Product.find(filter)
-                .select('_id title originalPrice salePrice stocks averageRating images isFeatured')
+                .select('_id title originalPrice salePrice stocks averageRating boughtCounter images isFeatured')
                 .skip((page - 1) * size).limit(size).sort(sortCriteria).lean().exec();
 
             const transformedProducts = products.map(product => ({
@@ -1135,7 +1136,7 @@ class userCont {
 
     static placeOrder = async (req, res) => {
 
-        const { addressId } = req.body;
+        const { addressId, paymentMethod } = req.body;
         try {
             const userId = req.user._id;
             const user = await User.findById(userId).populate("cart.productId", "title salePrice images");
@@ -1145,6 +1146,13 @@ class userCont {
             const address = user.addresses.id(addressId);
             if (!address) {
                 return res.status(400).json({ status: "failed", message: "Invalid address id provided!" });
+            }
+            if (!paymentMethod) {
+                return res.status(400).json({ status: "failed", message: "Payment method is required!" });
+            }
+            const pm = paymentMethod && typeof paymentMethod === "string" ? paymentMethod.toLowerCase() : "";
+            if (!pm || (pm !== "online" && pm !== "cod")) {
+                return res.status(400).json({ status: "failed", message: "Invalid payment method provided!" });
             }
 
             const items = user.cart.map(item => ({
@@ -1157,23 +1165,46 @@ class userCont {
                 image: item.productId && item.productId.images && item.productId.images.length > 0 ? item.productId.images[0] : null,
             }));
 
-            const totalAmount = items.reduce((sum, item) => sum + item.salePrice * item.quantity, 0);
-            if (!totalAmount || totalAmount <= 0) {
+            const baseAmount = items.reduce((sum, item) => sum + item.salePrice * item.quantity, 0);
+            if (!baseAmount || baseAmount <= 0) {
                 return res.status(400).json({ status: "failed", message: "Invalid total amount!" });
             }
-            const options = {
-                amount: Math.round(totalAmount * 100),
-                currency: 'INR'
-            };
+            const shippingCharge = 60;
+            const totalAmount = baseAmount + shippingCharge;
 
-            const payment = await instance.orders.create(options);
-            if (payment) {
-                const newOrder = new Order({ userId, items, totalAmount, address, status: "Created" });
-                await newOrder.save();
+            if (pm === "online") {
+                const options = {
+                    amount: Math.round(totalAmount * 100),
+                    currency: 'INR'
+                };
+                const payment = await instance.orders.create(options);
+                if (payment) {
+                    const newOrder = new Order({ userId, items, totalAmount, address, status: "Created", paymentMethod: pm });
+                    await newOrder.save();
 
-                return res.status(200).json({ status: "success", message: "Order created. Awaiting payment...", payment });
+                    return res.status(200).json({ status: "success", message: "Order created. Awaiting payment...", payment });
+                } else {
+                    return res.status(400).json({ status: "failed", message: "Order creation failed!" });
+                }
             } else {
-                return res.status(400).json({ status: "failed", message: "Order creation failed!" });
+                const newOrder = new Order({ userId, items, totalAmount, address, status: "Placed", paymentMethod: pm });
+
+                for (const item of newOrder.items) {
+                    const product = await Product.findById(item.productId);
+                    if (product) {
+                        product.stocks -= item.quantity;
+                        if (product.stocks < 0) {
+                            product.stocks = 0;
+                        }
+                        product.inStock = product.stocks > 0;
+                        product.boughtCounter += item.quantity;
+                        await product.save();
+                    }
+                }
+                await newOrder.save();
+                await User.findByIdAndUpdate(userId, { cart: [] });
+
+                return res.status(200).json({ status: "success", message: "Your order has been placed successfully." });
             }
         } catch (error) {
             return res.status(500).json({ status: "failed", message: "Server error, Please try again later!" });
@@ -1222,7 +1253,7 @@ class userCont {
                 return res.status(400).json({ status: "failed", message: "Payment verification failed!" });
             }
         } catch (error) {
-            return res.status(500).json({ status: "failed", message: "Server error, Please try again later!" });
+            return res.status(500).json({ status: "failed", message: "Server error, Please try again later!", error: error.message });
         }
     };
 
@@ -1266,6 +1297,31 @@ class userCont {
             return res.status(500).json({ status: "failed", message: "Server error, please try again later!" });
         }
     }
+
+    static cancelOrder = async (req, res) => {
+        try {
+            const { orderId } = req.params;
+            if (!orderId) {
+                return res.status(400).json({ status: "failed", message: "Order id is required!" });
+            }
+            const order = await Order.findById(orderId);
+            if (!order) {
+                return res.status(404).json({ status: "failed", message: "Order not found!" });
+            }
+            if (order.userId.toString() !== req.user._id.toString()) {
+                return res.status(403).json({ status: "failed", message: "You are not authorized to cancel this order!" });
+            }
+            if (order.status === "Delivered" || order.status === "Cancelled") {
+                return res.status(400).json({ status: "failed", message: "Order can't be cancelled." });
+            }
+            order.status = "Cancelled";
+            await order.save();
+
+            return res.status(200).json({ status: "success", message: "Your order has been cancelled." });
+        } catch (error) {
+            return res.status(500).json({ status: "failed", message: "Server error, please try again later!" });
+        }
+    };
 
 
     //admin
@@ -1383,6 +1439,50 @@ class userCont {
 
         } catch (error) {
             return res.status(500).json({ status: "failed", message: "Server error, Please try again later!" });
+        }
+    };
+
+    static makeManager = async (req, res) => {
+        try {
+            const { userId } = req.params;
+            if (!userId) {
+                return res.status(400).json({ status: "failed", message: "User ID is required!" });
+            }
+            const user = await User.findById(userId);
+            if (!user) {
+                return res.status(404).json({ status: "failed", message: "User not found!" });
+            }
+            if (user.role !== "User") {
+                return res.status(400).json({ status: "failed", message: "User is already a manager!" });
+            }
+            user.role = "Manager";
+            await user.save();
+
+            return res.status(200).json({ status: "success", message: "User has been promoted to Manager." });
+        } catch (error) {
+            return res.status(500).json({ status: "failed", message: "Server error, please try again later!" });
+        }
+    };
+
+    static makeUser = async (req, res) => {
+        try {
+            const { userId } = req.params;
+            if (!userId) {
+                return res.status(400).json({ status: "failed", message: "Manager ID is required!" });
+            }
+            const user = await User.findById(userId);
+            if (!user) {
+                return res.status(404).json({ status: "failed", message: "Manager not found!" });
+            }
+            if (user.role !== "Manager") {
+                return res.status(400).json({ status: "failed", message: "User is not a Manager. Only managers can be demoted!" });
+            }
+            user.role = "User";
+            await user.save();
+
+            return res.status(200).json({ status: "success", message: "Manager has been demoted to User." });
+        } catch (error) {
+            return res.status(500).json({ status: "failed", message: "Server error, please try again later!" });
         }
     };
 }

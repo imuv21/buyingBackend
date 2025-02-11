@@ -40,6 +40,7 @@ router.delete('/remove-from-cart', userCont.removeFromCart);
 router.get('/get-key', userCont.getKey);
 router.post('/place-order', userCont.placeOrder);
 router.get('/get-user-orders', userCont.getUserOrders);
+router.put('/cancel-order/:orderId', userCont.cancelOrder);
 
 
 // router.post('/signup', rateLimiter({ windowMs: 60 * 60 * 1000, max: 10 }), upload.single('image'), signupValidator, userCont.userSignup);

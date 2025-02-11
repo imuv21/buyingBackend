@@ -3,11 +3,11 @@ import { Filter } from "bad-words";
 const filter = new Filter();
 const hindiBadWords = [
     "gandu", "sala", "bhenchod", "madarchod", "cunt", "londa", "babu", "tittu",
-    "chutiya", "bibi", "loli", "kutta", "gand", "marr", "tad", "hindi", 
-    "lakkhan", "chalu", "patta", "fuck", "kaala", "gand", "marr", "behd", 
-    "churriya", "hawa", "titi", "nalli", "randi", "maand", "shod", "patu", 
-    "tatta", "kaki", "dandu", "macha", "hara", "jhangar", "lundi", "bawan", 
-    "chana", "far", "gaada", "pate", "baddo", "tund", "mair", "kara", 
+    "chutiya", "bibi", "loli", "kutta", "gand", "marr", "tad", "hindi",
+    "lakkhan", "chalu", "patta", "fuck", "kaala", "gand", "marr", "behd",
+    "churriya", "hawa", "titi", "nalli", "randi", "maand", "shod", "patu",
+    "tatta", "kaki", "dandu", "macha", "hara", "jhangar", "lundi", "bawan",
+    "chana", "far", "gaada", "pate", "baddo", "tund", "mair", "kara",
     "pidi", "rudi", "taddi", "behenchod", "madarchod", "mc", "bc"
 ];
 
@@ -50,7 +50,7 @@ const loginValidator = [
         .normalizeEmail({ gmail_remove_dots: true }),
     check("role")
         .notEmpty().withMessage("Role is required!")
-        .isIn(["User", "Admin"]).withMessage("Role must be either 'User' or 'Admin'!"),
+        .isIn(["User", "Manager", "Admin"]).withMessage("Role must be either 'User' or 'Manager'!"),
     check("password")
         .notEmpty().withMessage("Password is required!")
         .isStrongPassword({
@@ -70,7 +70,7 @@ const forgotPasswordValidator = [
         .normalizeEmail({ gmail_remove_dots: true }),
     check("role")
         .notEmpty().withMessage("Role is required!")
-        .isIn(["User", "Admin"]).withMessage("Role must be either 'User' or 'Admin'!")
+        .isIn(["User", "Manager", "Admin"]).withMessage("Role must be either 'User' or 'Manager'!"),
 ];
 
 const verifyPasswordOtpValidator = [

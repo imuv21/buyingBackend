@@ -27,4 +27,7 @@ router.delete('/remove-from-featured/:productId', isAdmin, userCont.removeFromFe
 router.get('/get-all-reviews', isAdmin, userCont.getReviewsAdmin);
 router.delete('/delete-review/:productId/:reviewId', isAdmin, userCont.deleteReview);
 
+router.put('/make-manager/:userId', isAdmin, userCont.makeManager);
+router.put('/make-user/:userId', isAdmin, userCont.makeUser);
+
 export default router;

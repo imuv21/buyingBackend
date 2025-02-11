@@ -226,6 +226,11 @@ const orderSchema = new mongoose.Schema({
         type: addressSchema,
         required: true
     },
+    paymentMethod: {
+        type: String,
+        enum: ["online", "cod"],
+        required: true
+    },
     status: {
         type: String,
         enum: ["Created", "Placed", "Shipped", "Delivered", "Cancelled"],
@@ -257,7 +262,7 @@ const userSchema = new mongoose.Schema({
     },
     role: {
         type: String,
-        enum: ["User", "Admin"],
+        enum: ["User", "Admin", "Manager"],
         default: "User",
     },
     password: {
