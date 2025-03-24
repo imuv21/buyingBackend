@@ -1,6 +1,5 @@
 import express from 'express';
 import { signupValidator, loginValidator, forgotPasswordValidator, verifyPasswordOtpValidator, updateProfileValidator, addressValidator, addReviewValidator } from '../middlewares/validation.js';
-import upload from '../middlewares/upload.js';
 import authedUser from '../middlewares/authedUser.js';
 import rateLimiter from '../middlewares/rateLimiter.js';
 import userCont from '../controllers/userCont.js';
